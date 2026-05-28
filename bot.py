@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import base64
+import time
 import requests
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -22,10 +23,14 @@ GOOGLE_TOKEN   = os.environ.get("GOOGLE_TOKEN", "")
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
-GEMINI_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-2.0-flash-lite:generateContent?key={key}"
-)
+# Модели для перебора по очереди если одна не работает
+GEMINI_MODELS = [
+    "gemini-1.5-flash-8b",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-latest",
+]
+
+GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
 
 
 def call_gemini(prompt: str, image_bytes: bytes) -> str:
@@ -45,11 +50,27 @@ def call_gemini(prompt: str, image_bytes: bytes) -> str:
             }
         ]
     }
-    url = GEMINI_URL.format(key=GEMINI_API_KEY)
-    resp = requests.post(url, json=body, timeout=60)
-    resp.raise_for_status()
-    result = resp.json()
-    return result["candidates"][0]["content"]["parts"][0]["text"]
+
+    last_error = None
+    for model in GEMINI_MODELS:
+        url = GEMINI_BASE.format(model=model, key=GEMINI_API_KEY)
+        try:
+            resp = requests.post(url, json=body, timeout=60)
+            if resp.status_code == 429:
+                logger.warning(f"Модель {model} — лимит 429, жду 5 сек...")
+                time.sleep(5)
+                resp = requests.post(url, json=body, timeout=60)
+            resp.raise_for_status()
+            result = resp.json()
+            logger.info(f"Использована модель: {model}")
+            return result["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception as e:
+            logger.warning(f"Модель {model} не сработала: {e}")
+            last_error = e
+            time.sleep(2)
+            continue
+
+    raise RuntimeError(f"Все модели Gemini недоступны. Последняя ошибка: {last_error}")
 
 
 def get_sheets_service():
