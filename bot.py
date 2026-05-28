@@ -23,14 +23,10 @@ GOOGLE_TOKEN   = os.environ.get("GOOGLE_TOKEN", "")
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
-# Модели для перебора по очереди если одна не работает
-GEMINI_MODELS = [
-    "gemini-1.5-flash-8b",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-latest",
-]
-
-GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
+GEMINI_URL = (
+    "https://generativelanguage.googleapis.com/v1beta/models/"
+    "gemini-2.0-flash-lite:generateContent?key={key}"
+)
 
 
 def call_gemini(prompt: str, image_bytes: bytes) -> str:
@@ -50,27 +46,24 @@ def call_gemini(prompt: str, image_bytes: bytes) -> str:
             }
         ]
     }
+    url = GEMINI_URL.format(key=GEMINI_API_KEY)
 
-    last_error = None
-    for model in GEMINI_MODELS:
-        url = GEMINI_BASE.format(model=model, key=GEMINI_API_KEY)
-        try:
-            resp = requests.post(url, json=body, timeout=60)
-            if resp.status_code == 429:
-                logger.warning(f"Модель {model} — лимит 429, жду 5 сек...")
-                time.sleep(5)
-                resp = requests.post(url, json=body, timeout=60)
-            resp.raise_for_status()
-            result = resp.json()
-            logger.info(f"Использована модель: {model}")
-            return result["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception as e:
-            logger.warning(f"Модель {model} не сработала: {e}")
-            last_error = e
-            time.sleep(2)
+    # Пробуем 3 раза с паузой при 429
+    for attempt in range(3):
+        resp = requests.post(url, json=body, timeout=60)
+        if resp.status_code == 429:
+            wait = 20 * (attempt + 1)  # 20с, 40с, 60с
+            logger.warning(f"429 лимит, жду {wait} сек (попытка {attempt+1}/3)...")
+            time.sleep(wait)
             continue
+        resp.raise_for_status()
+        result = resp.json()
+        return result["candidates"][0]["content"]["parts"][0]["text"]
 
-    raise RuntimeError(f"Все модели Gemini недоступны. Последняя ошибка: {last_error}")
+    raise RuntimeError(
+        "Gemini API временно недоступен (превышен лимит запросов). "
+        "Подожди минуту и отправь фото снова."
+    )
 
 
 def get_sheets_service():
@@ -158,6 +151,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except json.JSONDecodeError:
         await msg.edit_text("⚠️ ИИ не смог разобрать фото. Попробуй ещё раз.")
+    except RuntimeError as e:
+        await msg.edit_text(f"⏳ {e}")
     except Exception as e:
         logger.exception("Ошибка")
         await msg.edit_text(f"❌ Ошибка: {e}")
