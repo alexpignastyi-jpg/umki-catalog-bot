@@ -3,7 +3,6 @@ import json
 import logging
 import base64
 import requests
-import io
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from googleapiclient.discovery import build
@@ -25,7 +24,7 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-1.5-flash:generateContent?key={key}"
+    "gemini-2.0-flash-lite:generateContent?key={key}"
 )
 
 
