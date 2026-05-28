@@ -62,7 +62,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         img     = Image.open(io.BytesIO(bytes(raw)))
         caption = update.message.caption or ""
 
-        model  = genai.GenerativeModel("gemini-2.0-flash")
+        model  = genai.GenerativeModel("gemini-1.5-flash-latest")
         prompt = f"""Ты эксперт по сумкам и модным аксессуарам.
 Проанализируй фото сумки и извлеки из него (и из подписи) следующие данные.
 
@@ -101,12 +101,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         reply = (
             f"✅ Добавлено в таблицу!\n\n"
-            f"📦 Артикул: {data.get(chr(39)+'artikul'+chr(39), chr(39)+'не указан'+chr(39))}\n"
-            f"👜 Модель:  {data.get(chr(39)+'model'+chr(39), chr(39)+chr(39))}\n"
-            f"📐 Размер:  {data.get(chr(39)+'razmer'+chr(39), chr(39)+'не указан'+chr(39))}\n"
-            f"💰 Цена:    {data.get(chr(39)+'cena'+chr(39), chr(39)+'не указана'+chr(39))} $\n"
-            f"🎨 Цвета:   {data.get(chr(39)+'cveta'+chr(39), chr(39)+chr(39))}\n\n"
-            f"📝 {data.get(chr(39)+'opisanie'+chr(39), chr(39)+chr(39))}"
+            f"📦 Артикул: {data.get('artikul', 'не указан')}\n"
+            f"👜 Модель:  {data.get('model', '')}\n"
+            f"📐 Размер:  {data.get('razmer', 'не указан')}\n"
+            f"💰 Цена:    {data.get('cena', 'не указана')} $\n"
+            f"🎨 Цвета:   {data.get('cveta', '')}\n\n"
+            f"📝 {data.get('opisanie', '')}"
         )
         await msg.edit_text(reply)
 
