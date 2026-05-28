@@ -1,15 +1,14 @@
 import os
 import json
 import logging
+import base64
+import requests
 import io
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from google import genai
-from google.genai import types
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
-from PIL import Image
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -24,7 +23,34 @@ GOOGLE_TOKEN   = os.environ.get("GOOGLE_TOKEN", "")
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
-gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+GEMINI_URL = (
+    "https://generativelanguage.googleapis.com/v1beta/models/"
+    "gemini-1.5-flash:generateContent?key={key}"
+)
+
+
+def call_gemini(prompt: str, image_bytes: bytes) -> str:
+    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+    body = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt},
+                    {
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": image_b64
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+    url = GEMINI_URL.format(key=GEMINI_API_KEY)
+    resp = requests.post(url, json=body, timeout=60)
+    resp.raise_for_status()
+    result = resp.json()
+    return result["candidates"][0]["content"]["parts"][0]["text"]
 
 
 def get_sheets_service():
@@ -64,28 +90,22 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         raw = await tg_file.download_as_bytearray()
         caption = update.message.caption or ""
 
-        image_part = types.Part.from_bytes(data=bytes(raw), mime_type="image/jpeg")
-
         prompt = (
             "Ты эксперт по сумкам. Проанализируй фото и подпись пользователя.\n"
             f"Подпись: {caption if caption else 'отсутствует'}\n\n"
             "Верни ТОЛЬКО валидный JSON без markdown:\n"
             '{\n'
-            '  \"artikul\": \"артикул или не указан\",\n'
-            '  \"model\": \"название сумки\",\n'
-            '  \"razmer\": \"размер или не указан\",\n'
-            '  \"cena\": \"цена числом или не указана\",\n'
-            '  \"cveta\": \"цвета через запятую\",\n'
-            '  \"opisanie\": \"продающее описание на русском 2-3 предложения\"\n'
+            '  "artikul": "артикул или не указан",\n'
+            '  "model": "название сумки",\n'
+            '  "razmer": "размер или не указан",\n'
+            '  "cena": "цена числом или не указана",\n'
+            '  "cveta": "цвета через запятую",\n'
+            '  "opisanie": "продающее описание на русском 2-3 предложения"\n'
             '}'
         )
 
-        response = gemini_client.models.generate_content(
-            model="gemini-1.5-flash",
-            contents=[prompt, image_part]
-        )
-
-        response_text = response.text.strip()
+        response_text = call_gemini(prompt, bytes(raw))
+        response_text = response_text.strip()
 
         if "```" in response_text:
             parts = response_text.split("```")
