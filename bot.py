@@ -4,7 +4,8 @@ import logging
 import io
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
@@ -23,7 +24,7 @@ GOOGLE_TOKEN   = os.environ.get("GOOGLE_TOKEN", "")
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
-genai.configure(api_key=GEMINI_API_KEY)
+gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 def get_sheets_service():
@@ -61,25 +62,29 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         photo = update.message.photo[-1]
         tg_file = await context.bot.get_file(photo.file_id)
         raw = await tg_file.download_as_bytearray()
-        img = Image.open(io.BytesIO(bytes(raw)))
         caption = update.message.caption or ""
 
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        image_part = types.Part.from_bytes(data=bytes(raw), mime_type="image/jpeg")
+
         prompt = (
             "Ты эксперт по сумкам. Проанализируй фото и подпись пользователя.\n"
             f"Подпись: {caption if caption else 'отсутствует'}\n\n"
             "Верни ТОЛЬКО валидный JSON без markdown:\n"
             '{\n'
-            '  "artikul": "артикул или не указан",\n'
-            '  "model": "название сумки",\n'
-            '  "razmer": "размер или не указан",\n'
-            '  "cena": "цена числом или не указана",\n'
-            '  "cveta": "цвета через запятую",\n'
-            '  "opisanie": "продающее описание на русском 2-3 предложения"\n'
+            '  \"artikul\": \"артикул или не указан\",\n'
+            '  \"model\": \"название сумки\",\n'
+            '  \"razmer\": \"размер или не указан\",\n'
+            '  \"cena\": \"цена числом или не указана\",\n'
+            '  \"cveta\": \"цвета через запятую\",\n'
+            '  \"opisanie\": \"продающее описание на русском 2-3 предложения\"\n'
             '}'
         )
 
-        response = model.generate_content([prompt, img])
+        response = gemini_client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=[prompt, image_part]
+        )
+
         response_text = response.text.strip()
 
         if "```" in response_text:
