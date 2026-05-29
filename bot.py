@@ -3,7 +3,9 @@ import json
 import logging
 import base64
 import time
+import io
 import requests
+from PIL import Image
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from googleapiclient.discovery import build
@@ -29,6 +31,23 @@ GEMINI_URL = (
 )
 
 
+def compress_image(raw_bytes: bytes, max_size: int = 1024) -> bytes:
+    """Сжимает изображение до max_size пикселей по длинной стороне."""
+    img = Image.open(io.BytesIO(raw_bytes))
+    img = img.convert("RGB")
+    w, h = img.size
+    if w > max_size or h > max_size:
+        ratio = min(max_size / w, max_size / h)
+        new_w = int(w * ratio)
+        new_h = int(h * ratio)
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=85, optimize=True)
+    compressed = buf.getvalue()
+    logger.info(f"Фото сжато: {len(raw_bytes)//1024}КБ → {len(compressed)//1024}КБ")
+    return compressed
+
+
 def call_gemini(prompt: str, image_bytes: bytes) -> str:
     image_b64 = base64.b64encode(image_bytes).decode("utf-8")
     body = {
@@ -48,11 +67,10 @@ def call_gemini(prompt: str, image_bytes: bytes) -> str:
     }
     url = GEMINI_URL.format(key=GEMINI_API_KEY)
 
-    # Пробуем 3 раза с паузой при 429
     for attempt in range(3):
         resp = requests.post(url, json=body, timeout=60)
         if resp.status_code == 429:
-            wait = 20 * (attempt + 1)  # 20с, 40с, 60с
+            wait = 20 * (attempt + 1)
             logger.warning(f"429 лимит, жду {wait} сек (попытка {attempt+1}/3)...")
             time.sleep(wait)
             continue
@@ -103,6 +121,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         raw = await tg_file.download_as_bytearray()
         caption = update.message.caption or ""
 
+        # Сжимаем фото перед отправкой в Gemini
+        compressed = compress_image(bytes(raw))
+
         prompt = (
             "Ты эксперт по сумкам. Проанализируй фото и подпись пользователя.\n"
             f"Подпись: {caption if caption else 'отсутствует'}\n\n"
@@ -117,7 +138,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             '}'
         )
 
-        response_text = call_gemini(prompt, bytes(raw))
+        response_text = call_gemini(prompt, compressed)
         response_text = response_text.strip()
 
         if "```" in response_text:
