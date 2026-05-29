@@ -3,3 +3,4 @@ requests>=2.31.0
 google-api-python-client==2.111.0
 google-auth==2.36.0
 google-auth-oauthlib==1.2.0
+Pillow>=10.3.0
